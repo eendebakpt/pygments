@@ -516,6 +516,24 @@ class RegexLexerMeta(LexerMeta):
     self.tokens on the first instantiation.
     """
 
+    def __new__(mcls, name, bases, attrs):
+        cls = super().__new__(mcls, name, bases, attrs)
+        if name != 'RegexLexer' and hasattr(cls, 'tokens') and not hasattr(cls, '_tokens'):
+            cls._ensure_tokens()
+        return cls
+
+    def _ensure_tokens(cls):
+        if '_tokens' in cls.__dict__:
+            return cls._tokens
+        if not hasattr(cls, 'tokens'):
+            return None
+        cls._all_tokens = {}
+        cls._tmpname = 0
+        if hasattr(cls, 'token_variants') and cls.token_variants:
+            return None
+        cls._tokens = cls.process_tokendef('', cls.get_tokendefs())
+        return cls._tokens
+
     def _process_regex(cls, regex, rflags, state):
         """Preprocess the regular expression component of a token definition."""
         if isinstance(regex, Future):
@@ -674,7 +692,7 @@ class RegexLexerMeta(LexerMeta):
     def process_tokendef(cls, name, tokendefs=None):
         """Preprocess a dictionary of token definitions."""
         processed = cls._all_tokens[name] = {}
-        tokendefs = tokendefs or cls.tokens[name]
+        tokendefs = cls.tokens[name] if tokendefs is None else tokendefs
         for state in list(tokendefs):
             cls._process_state(tokendefs, processed, state)
         if getattr(cls, 'merge_simple_rules', True):
@@ -733,15 +751,7 @@ class RegexLexerMeta(LexerMeta):
 
     def __call__(cls, *args, **kwds):
         """Instantiate cls after preprocessing its token definitions."""
-        if '_tokens' not in cls.__dict__:
-            cls._all_tokens = {}
-            cls._tmpname = 0
-            if hasattr(cls, 'token_variants') and cls.token_variants:
-                # don't process yet
-                pass
-            else:
-                cls._tokens = cls.process_tokendef('', cls.get_tokendefs())
-
+        cls._ensure_tokens()
         return type.__call__(cls, *args, **kwds)
 
 

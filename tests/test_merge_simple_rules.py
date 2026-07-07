@@ -78,6 +78,13 @@ def test_disable_toggle():
     assert 'grouped' not in names
 
 
+def test_bundled_lexers_prepare_tokens_on_import():
+    from pygments.lexers.python import PythonLexer
+
+    assert hasattr(PythonLexer, '_tokens')
+    assert PythonLexer._tokens['root']
+
+
 # A spread of bundled lexers that use RegexLexer / ExtendedRegexLexer.
 BUNDLED = ['python', 'c', 'javascript', 'bash', 'html', 'css', 'yaml', 'rust',
            'go', 'ruby', 'typescript', 'sql', 'java', 'perl', 'php', 'lua',

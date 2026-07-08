@@ -360,12 +360,4 @@ newmod = _automodule(__name__)
 newmod.__dict__.update(oldmod.__dict__)
 sys.modules[__name__] = newmod
 
-try:
-    from pygments.lexers._generated_regexlexer_optimizations import apply_optimizations
-except ImportError:  # pragma: no cover - generated module may be absent during bootstrap
-    def apply_optimizations():
-        return None
-else:
-    apply_optimizations()
-
 del newmod.newmod, newmod.oldmod, newmod.sys, newmod.types

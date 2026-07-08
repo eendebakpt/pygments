@@ -78,11 +78,14 @@ def test_disable_toggle():
     assert 'grouped' not in names
 
 
-def test_bundled_lexers_prepare_tokens_on_import():
+def test_bundled_lexers_prepare_tokens_on_instantiation():
+    # Token tables (with the precomputed merge plan applied) are built lazily on
+    # first instantiation, so bundled lexers stay cheap to merely import.
     from pygments.lexers.python import PythonLexer
 
+    instance = PythonLexer()
     assert hasattr(PythonLexer, '_tokens')
-    assert PythonLexer._tokens['root']
+    assert instance._tokens['root']
 
 
 # A spread of bundled lexers that use RegexLexer / ExtendedRegexLexer.

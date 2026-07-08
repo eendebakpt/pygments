@@ -516,12 +516,6 @@ class RegexLexerMeta(LexerMeta):
     self.tokens on the first instantiation.
     """
 
-    def __new__(mcls, name, bases, attrs):
-        cls = super().__new__(mcls, name, bases, attrs)
-        if name != 'RegexLexer' and hasattr(cls, 'tokens') and not hasattr(cls, '_tokens'):
-            cls._ensure_tokens()
-        return cls
-
     def _ensure_tokens(cls):
         if '_tokens' in cls.__dict__:
             return cls._tokens
@@ -624,9 +618,9 @@ class RegexLexerMeta(LexerMeta):
             tokens.append((rex, token, new_state))
         return tokens
 
-    def _merge_simple_runs(cls, tokens):
-        """Merge maximal runs of consecutive "simple" rules in a processed state
-        into a single combined regex.
+    def _compute_merge_plan(cls, tokens):
+        """Return the plan for merging runs of consecutive "simple" rules in a
+        processed state.
 
         A rule is *simple* when it emits one plain token for the whole match and
         does not change state (``(match, _TokenType, None)``), shares the base
@@ -636,68 +630,140 @@ class RegexLexerMeta(LexerMeta):
         merging them is output-preserving while replacing N per-position
         ``match()`` calls with one.  Non-simple rules stay in place as barriers,
         so the relative order of every rule is unchanged.
+
+        The plan is a list of segments in rule order: an ``int`` index for a
+        rule kept as-is, or a list of consecutive indices whose rules are to be
+        merged.  It depends only on the rules' patterns/actions/flags, so it is
+        computed once at build time (see
+        ``scripts/gen_regexlexer_optimizations.py``) and applied cheaply at
+        import time by :meth:`_apply_merge_plan`.
         """
-        result = []
+        plan = []
         run = []
 
         def flush():
             if len(run) < 2:
-                result.extend(run)
-                run.clear()
-                return
-            flags = run[0][0].__self__.flags
-            parts = [f'(?P<g{i}>{rexmatch.__self__.pattern})'
-                     for i, (rexmatch, _, _) in enumerate(run)]
-            compiled = re.compile('|'.join(parts), flags)
-            # Map every capturing-group index to the token of the alternative
-            # that owns it, so dispatch works even when a rule has inner groups:
-            # exactly one alternative matches, and all its groups (outer wrapper
-            # plus any inner ones) fall in a contiguous index range.
-            groupmap = [None] * (compiled.groups + 1)
-            for i, (_, token, _) in enumerate(run):
-                start = compiled.groupindex[f'g{i}']
-                end = (compiled.groupindex[f'g{i + 1}']
-                       if i + 1 < len(run) else compiled.groups + 1)
-                for g in range(start, end):
-                    groupmap[g] = token
-            combined = compiled.match
-
-            def grouped(lexer, match, ctx=None, _groupmap=groupmap):
-                yield match.start(), _groupmap[match.lastindex], match.group()
-                if ctx is not None:
-                    # ExtendedRegexLexer: callbacks must advance the context.
-                    ctx.pos = match.end()
-
-            result.append((combined, grouped, None))
+                plan.extend(i for i, _ in run)
+            else:
+                plan.append([i for i, _ in run])
             run.clear()
 
-        for rule in tokens:
+        for i, rule in enumerate(tokens):
             rexmatch, action, new_state = rule
             simple = (new_state is None and type(action) is _TokenType
                       and _can_merge_pattern(rexmatch.__self__.pattern))
             # Only merge consecutive simple rules that share the same compiled
             # flags, so the single combined regex is equivalent to each rule.
             if simple and (not run
-                           or rexmatch.__self__.flags == run[0][0].__self__.flags):
-                run.append(rule)
+                           or rexmatch.__self__.flags == run[0][1][0].__self__.flags):
+                run.append((i, rule))
             else:
                 flush()
                 if simple:
-                    run.append(rule)
+                    run.append((i, rule))
                 else:
-                    result.append(rule)
+                    plan.append(i)
         flush()
+        return plan
+
+    def _build_merged_rule(cls, run):
+        """Combine a *run* of simple processed rules into one alternation rule.
+
+        Returns ``None`` if the rules are not in fact mergeable; this lets a
+        stale precomputed plan be detected so the merge can be recomputed.
+        """
+        flags = run[0][0].__self__.flags
+        for rexmatch, action, new_state in run:
+            if (new_state is not None or type(action) is not _TokenType
+                    or rexmatch.__self__.flags != flags
+                    or not _can_merge_pattern(rexmatch.__self__.pattern)):
+                return None
+        parts = [f'(?P<g{i}>{rexmatch.__self__.pattern})'
+                 for i, (rexmatch, _, _) in enumerate(run)]
+        compiled = re.compile('|'.join(parts), flags)
+        # Map every capturing-group index to the token of the alternative that
+        # owns it, so dispatch works even when a rule has inner groups: exactly
+        # one alternative matches, and all its groups (outer wrapper plus any
+        # inner ones) fall in a contiguous index range.
+        groupmap = [None] * (compiled.groups + 1)
+        for i, (_, token, _) in enumerate(run):
+            start = compiled.groupindex[f'g{i}']
+            end = (compiled.groupindex[f'g{i + 1}']
+                   if i + 1 < len(run) else compiled.groups + 1)
+            for g in range(start, end):
+                groupmap[g] = token
+
+        def grouped(lexer, match, ctx=None, _groupmap=groupmap):
+            yield match.start(), _groupmap[match.lastindex], match.group()
+            if ctx is not None:
+                # ExtendedRegexLexer: callbacks must advance the context.
+                ctx.pos = match.end()
+
+        return (compiled.match, grouped, None)
+
+    def _apply_merge_plan(cls, tokens, plan):
+        """Rebuild a processed state from *tokens* and a merge *plan*.
+
+        Returns ``None`` if *plan* does not describe a complete, in-order
+        segmentation of *tokens* (i.e. it is stale relative to the current
+        rules), so the caller can fall back to recomputing the merge.
+        """
+        result = []
+        expected = 0
+        for seg in plan:
+            if type(seg) is int:
+                if seg != expected or seg >= len(tokens):
+                    return None
+                expected = seg + 1
+                result.append(tokens[seg])
+            else:
+                if (seg[0] != expected or seg[-1] >= len(tokens)
+                        or seg != list(range(seg[0], seg[-1] + 1))):
+                    return None
+                expected = seg[-1] + 1
+                merged = cls._build_merged_rule([tokens[i] for i in seg])
+                if merged is None:
+                    return None
+                result.append(merged)
+        if expected != len(tokens):
+            return None
         return result
 
-    def process_tokendef(cls, name, tokendefs=None):
+    def _merge_simple_runs(cls, tokens):
+        """Merge runs of consecutive simple rules in a processed state, computing
+        the plan on the fly (used when no precomputed plan is available)."""
+        return cls._apply_merge_plan(tokens, cls._compute_merge_plan(tokens))
+
+    def _merge_plan(cls):
+        """Return the precomputed per-state merge plan for this lexer, or
+        ``None`` if no plan was generated (e.g. plugin lexers, or before the
+        generated module has been built)."""
+        try:
+            from pygments.lexers._generated_regexlexer_optimizations import \
+                MERGE_PLANS
+        except ImportError:
+            return None
+        return MERGE_PLANS.get(f'{cls.__module__}.{cls.__qualname__}')
+
+    def process_tokendef(cls, name, tokendefs=None, merge=True):
         """Preprocess a dictionary of token definitions."""
         processed = cls._all_tokens[name] = {}
         tokendefs = cls.tokens[name] if tokendefs is None else tokendefs
         for state in list(tokendefs):
             cls._process_state(tokendefs, processed, state)
-        if getattr(cls, 'merge_simple_rules', True):
-            for state in processed:
-                processed[state] = cls._merge_simple_runs(processed[state])
+        if merge and getattr(cls, 'merge_simple_rules', True):
+            plan = cls._merge_plan()
+            for state, rules in processed.items():
+                if plan is None:
+                    # No precomputed plan (plugin lexer, or the generated module
+                    # is missing): compute and apply the merge at runtime.
+                    processed[state] = cls._merge_simple_runs(rules)
+                else:
+                    state_plan = plan.get(state)
+                    if state_plan:
+                        merged = cls._apply_merge_plan(rules, state_plan)
+                        processed[state] = (merged if merged is not None
+                                            else cls._merge_simple_runs(rules))
         return processed
 
     def get_tokendefs(cls):

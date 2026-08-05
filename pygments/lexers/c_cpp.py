@@ -184,14 +184,14 @@ class CFamilyLexer(RegexLexer):
             (r'\\', String),  # stray backslash
         ],
         'macro': [
-            (r'('+_ws1+r')(include)('+_ws1+r')("[^"]+"|<[^>]+>)([^\S\n]*)([^/\n]*/[*](.|\n)*?[*]/)',
+            (r'('+_ws1+r')(include)('+_ws1+r')("[^"]+"|<[^>]+>)([^\S\n]*)([^/\n]*/[*][\s\S]*?[*]/)',
                 bygroups(using(this), Comment.Preproc, using(this),
                          Comment.PreprocFile, using(this), Comment.Multiline)),
             (r'('+_ws1+r')(include)('+_ws1+r')("[^"]+"|<[^>]+>)([^\S\n]*)([^\n]*)',
                 bygroups(using(this), Comment.Preproc, using(this),
                          Comment.PreprocFile, using(this), Comment.Single)),
             (r'[^/\n]+', Comment.Preproc),
-            (r'/[*](.|\n)*?[*]/', Comment.Multiline),
+            (r'/[*][\s\S]*?[*]/', Comment.Multiline),
             (r'//.*?\n', Comment.Single, '#pop'),
             (r'/', Comment.Preproc),
             (r'(?<=\\)\n', Comment.Preproc),
@@ -377,7 +377,7 @@ class CppLexer(CFamilyLexer):
     tokens = {
         'statements': [
             # C++11 raw strings
-            (r'((?:[LuU]|u8)?R)(")([^\\()\s]{,16})(\()((?:.|\n)*?)(\)\3)(")',
+            (r'((?:[LuU]|u8)?R)(")([^\\()\s]{,16})(\()([\s\S]*?)(\)\3)(")',
              bygroups(String.Affix, String, String.Delimiter, String.Delimiter,
                       String, String.Delimiter, String)),
             # C++26 annotations [[=Annotation]]

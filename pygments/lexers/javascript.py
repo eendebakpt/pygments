@@ -249,8 +249,6 @@ class KalLexer(RegexLexer):
                 bygroups(Keyword, Whitespace, Keyword)),
             (r'(?<![.$])(inherits)(\s+)(from)?\b',
                 bygroups(Keyword, Whitespace, Keyword)),
-            (r'(?<![.$])(for)(\s+)(parallel|series)?\b',
-                bygroups(Keyword, Whitespace, Keyword)),
             (words((
                 'in', 'of', 'while', 'until', 'break', 'return', 'continue',
                 'when', 'if', 'unless', 'else', 'otherwise', 'throw', 'raise',
@@ -845,8 +843,8 @@ class ObjectiveJLexer(RegexLexer):
             (r'\s+', Whitespace),
             (r'(\\)(\n)',
                 bygroups(String.Escape, Whitespace)),  # line continuation
-            (r'//(\n|(.|\n)*?[^\\]\n)', Comment.Single),
-            (r'/(\\\n)?[*](.|\n)*?[*](\\\n)?/', Comment.Multiline),
+            (r'//(\n|[\s\S]*?[^\\]\n)', Comment.Single),
+            (r'/(\\\n)?[*][\s\S]*?[*](\\\n)?/', Comment.Multiline),
             (r'<!--', Comment),
         ],
         'slashstartsregex': [
@@ -860,8 +858,8 @@ class ObjectiveJLexer(RegexLexer):
             (r'\n', Whitespace, '#pop'),
         ],
         'statements': [
-            (r'(L|@)?"', String, 'string'),
-            (r"(L|@)?'(\\.|\\[0-7]{1,3}|\\x[a-fA-F0-9]{1,2}|[^\\\'\n])'",
+            (r'[L@]?"', String, 'string'),
+            (r"[L@]?'(\\.|\\[0-7]{1,3}|\\x[a-fA-F0-9]{1,2}|[^\\\'\n])'",
              String.Char),
             (r'"(\\\\|\\[^\\]|[^"\\])*"', String.Double),
             (r"'(\\\\|\\[^\\]|[^'\\])*'", String.Single),
@@ -995,7 +993,7 @@ class ObjectiveJLexer(RegexLexer):
         ],
         'macro': [
             (r'[^/\n]+', Comment.Preproc),
-            (r'/[*](.|\n)*?[*]/', Comment.Multiline),
+            (r'/[*][\s\S]*?[*]/', Comment.Multiline),
             (r'(//.*?)(\n)', bygroups(Comment.Single, Whitespace), '#pop'),
             (r'/', Comment.Preproc),
             (r'(?<=\\)\n', Whitespace),

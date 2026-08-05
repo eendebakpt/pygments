@@ -911,7 +911,8 @@ class ClojureLexer(RegexLexer):
             # strings, symbols and characters
             (r'"(\\\\|\\[^\\]|[^"\\])*"', String),
             (r"'" + valid_name, String.Symbol),
-            (r"\\(.|[a-z]+)", String.Char),
+            (r"\\(?:newline|space|tab|formfeed|backspace|return"
+             r"|u[0-9a-fA-F]{4}|o[0-7]{1,3}|.)", String.Char),
 
             # keywords
             (r'::?#?' + valid_name, String.Symbol),
@@ -1183,6 +1184,7 @@ class KotlinLexer(RegexLexer):
             (r'' + kt_id + r'(\?(?![.:]))?', Name)
         ],
         'class': [
+            (r'\{', Punctuation, '#pop'),
             (kt_id, Name.Class, '#pop')
         ],
         'variable': [
@@ -1446,7 +1448,7 @@ class GoloLexer(RegexLexer):
             (r'"""', String, combined('stringescape', 'triplestring')),
             (r'"', String, combined('stringescape', 'doublestring')),
             (r"'", String, combined('stringescape', 'singlestring')),
-            (r'----((.|\n)*?)----', String.Doc)
+            (r'----([\s\S]*?)----', String.Doc)
 
         ],
 
